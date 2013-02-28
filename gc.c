@@ -1743,10 +1743,20 @@ rb_gc_mark_maybe(VALUE obj)
     }
 }
 
+static VALUE cur_parent;
+static VALUE sought;
+static VALUE found;
+
 static void
 gc_mark(rb_objspace_t *objspace, VALUE ptr)
 {
     register RVALUE *obj;
+
+    if (sought && ptr == sought && cur_parent != found) {
+        if (cur_parent && CLASS_OF(cur_parent)) {
+              rb_ary_push(found, cur_parent);
+        }
+    }
 
     obj = RANY(ptr);
     if (rb_special_const_p(ptr)) return; /* special const not marked */
@@ -1768,18 +1778,21 @@ static void
 gc_mark_children(rb_objspace_t *objspace, VALUE ptr)
 {
     register RVALUE *obj = RANY(ptr);
+    VALUE last_parent = cur_parent;
 
     goto marking;		/* skip */
 
   again:
     obj = RANY(ptr);
-    if (rb_special_const_p(ptr)) return; /* special const not marked */
-    if (obj->as.basic.flags == 0) return;       /* free cell */
-    if (obj->as.basic.flags & FL_MARK) return;  /* already marked */
+    if (rb_special_const_p(ptr)) goto exeunt; /* special const not marked */
+    if (obj->as.basic.flags == 0) goto exeunt;       /* free cell */
+    if (obj->as.basic.flags & FL_MARK) goto exeunt;  /* already marked */
     obj->as.basic.flags |= FL_MARK;
     objspace->heap.live_num++;
 
   marking:
+    cur_parent = ptr;
+
     if (FL_TEST(obj, FL_EXIVAR)) {
 	rb_mark_generic_ivar(ptr);
     }
@@ -1919,7 +1932,7 @@ gc_mark_children(rb_objspace_t *objspace, VALUE ptr)
 		gc_mark(objspace, (VALUE)obj->as.node.u3.node);
 	    }
 	}
-	return;			/* no need to mark class. */
+	goto exeunt;			/* no need to mark class. */
     }
 
     gc_mark(objspace, obj->as.basic.klass);
@@ -2034,6 +2047,11 @@ gc_mark_children(rb_objspace_t *objspace, VALUE ptr)
 	       BUILTIN_TYPE(obj), (void *)obj,
 	       is_pointer_to_heap(objspace, obj) ? "corrupted object" : "non object");
     }
+
+  exeunt:
+    cur_parent = last_parent;
+
+    return;
 }
 
 static int obj_free(rb_objspace_t *, VALUE);
@@ -2645,6 +2663,19 @@ rb_gc_start(void)
 {
     rb_gc();
     return Qnil;
+}
+VALUE
+os_find_references(VALUE os, VALUE obj)
+{
+    sought = obj;
+    if (!found) {
+        found = rb_ary_new2(1024);
+        rb_iv_set(rb_mGC, "found", found);
+    }
+    rb_ary_resize(found, 0);
+    rb_gc();
+    sought = 0;
+    return rb_ary_dup(found);
 }
 
 #undef Init_stack
@@ -3695,6 +3726,7 @@ Init_GC(void)
 
     rb_define_module_function(rb_mObSpace, "define_finalizer", define_final, -1);
     rb_define_module_function(rb_mObSpace, "undefine_finalizer", undefine_final, 1);
+    rb_define_module_function(rb_mObSpace, "find_references", os_find_references, 1);
 
     rb_define_module_function(rb_mObSpace, "_id2ref", id2ref, 1);
 
