@@ -4350,6 +4350,20 @@ count_objects(int argc, VALUE *argv, VALUE os)
     return hash;
 }
 
+#ifdef GC_DEBUG
+static VALUE
+rb_obj_sourcefile(VALUE obj)
+{
+    return RANY(obj)->file;
+}
+
+static VALUE
+rb_obj_sourceline(VALUE obj)
+{
+    return INT2FIX(RANY(obj)->line);
+}
+#endif
+
 /* call-seq:
  *  ObjectSpace.live_objects => number
  *
@@ -4738,6 +4752,9 @@ Init_GC(void)
 
     rb_define_method(rb_cBasicObject, "__id__", rb_obj_id, 0);
     rb_define_method(rb_mKernel, "object_id", rb_obj_id, 0);
+
+    rb_define_method(rb_cBasicObject, "__sourcefile__", rb_obj_sourcefile, 0);
+    rb_define_method(rb_cBasicObject, "__sourceline__", rb_obj_sourceline, 0);
 
     rb_define_module_function(rb_mObSpace, "count_objects", count_objects, -1);
 
