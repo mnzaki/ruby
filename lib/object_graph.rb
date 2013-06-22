@@ -47,7 +47,7 @@ class ObjectGraph
     str = "digraph G {\n"
 
     edges.flat_map{ |x| x }.uniq.each do |o|
-      label = o.inspect.sub(/^(.{253})....+/){ $1 + "..." }.gsub(/.{64}/){ $& + "\n"}
+      label = "#{o.object_id}: " + o.inspect.sub(/^(.{253})....+/){ $1 + "..." }.gsub(/.{64}/){ $& + "\n"}
       str << "#{o.__id__} [label=#{label.inspect}]\n"
     end
 
