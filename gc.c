@@ -313,6 +313,7 @@ typedef struct RVALUE {
 #ifdef GC_DEBUG
     VALUE file;
     int   line;
+    int   seen;
 #endif
 } RVALUE;
 
@@ -3729,6 +3730,7 @@ rb_objspace_each_objects(each_obj_callback *callback, void *data)
 struct os_each_struct {
     size_t num;
     VALUE of;
+    int unseen;
 };
 
 static int
@@ -3750,10 +3752,11 @@ os_obj_of_i(void *vstart, void *vend, size_t stride, void *data)
 		if (FL_TEST(p, FL_SINGLETON))
 		  continue;
 	      default:
-		if (!p->as.basic.klass) continue;
+		if (!p->as.basic.klass || (oes->unseen && p->seen)) continue;
 		v = (VALUE)p;
 		if (!oes->of || rb_obj_is_kind_of(v, oes->of)) {
 		    rb_yield(v);
+                    if (oes->unseen) p->seen = 1;
 		    oes->num++;
 		}
 	    }
@@ -3764,15 +3767,33 @@ os_obj_of_i(void *vstart, void *vend, size_t stride, void *data)
 }
 
 static VALUE
-os_obj_of(VALUE of)
+os_obj_of(VALUE of, int unseen)
 {
     struct os_each_struct oes;
 
     oes.num = 0;
     oes.of = of;
+    oes.unseen = unseen;
     rb_objspace_each_objects(os_obj_of_i, &oes);
     return SIZET2NUM(oes.num);
 }
+
+static VALUE
+_os_each_obj(int argc, VALUE *argv, VALUE os, int unseen)
+{
+    VALUE of;
+
+    rb_secure(4);
+    if (argc == 0) {
+	of = 0;
+    }
+    else {
+	rb_scan_args(argc, argv, "01", &of);
+    }
+    RETURN_ENUMERATOR(os, 1, &of);
+    return os_obj_of(of, unseen);
+}
+
 
 /*
  *  call-seq:
@@ -3813,18 +3834,26 @@ os_obj_of(VALUE of)
 static VALUE
 os_each_obj(int argc, VALUE *argv, VALUE os)
 {
-    VALUE of;
-
-    rb_secure(4);
-    if (argc == 0) {
-	of = 0;
-    }
-    else {
-	rb_scan_args(argc, argv, "01", &of);
-    }
-    RETURN_ENUMERATOR(os, 1, &of);
-    return os_obj_of(of);
+    _os_each_obj(argc, argv, os, 0);
 }
+
+/*
+ *  call-seq:
+ *     ObjectSpace.each_unseen_object([module]) {|obj| ... } -> fixnum
+ *     ObjectSpace.each_unseen_object([module])              -> an_enumerator
+ *
+ *  Behaves exactly like each_object but objects yielded are never yielded again
+ *
+ *    ObjectSpace.each_unseen_object { |o| } # returns the object count
+ *    ObjectSpace.each_unseen_object { |o| } # returns 0 as no new objects have been created
+ */
+
+static VALUE
+os_each_unseen_obj(int argc, VALUE *argv, VALUE os)
+{
+    _os_each_obj(argc, argv, os, 1);
+}
+
 
 /*
  *  call-seq:
@@ -4734,6 +4763,7 @@ Init_GC(void)
 
     rb_mObSpace = rb_define_module("ObjectSpace");
     rb_define_module_function(rb_mObSpace, "each_object", os_each_obj, -1);
+    rb_define_module_function(rb_mObSpace, "each_unseen_object", os_each_unseen_obj, -1);
     rb_define_module_function(rb_mObSpace, "garbage_collect", rb_gc_start, 0);
 
     rb_define_module_function(rb_mObSpace, "live_objects", os_live_objects, 0);
